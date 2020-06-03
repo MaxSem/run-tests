@@ -1,0 +1,13 @@
+{
+    "type": "project",
+    "authors": [
+        {
+            "name": "Max Semenik",
+            "email": "maxsem.wiki@gmail.com"
+        }
+    ],
+    "autoload": {
+        "classmap": ["src/"]
+    },
+    "require": {}
+}
