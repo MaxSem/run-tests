@@ -9,5 +9,7 @@
     "autoload": {
         "classmap": ["src/"]
     },
-    "require": {}
+    "require": {
+        "ext-zlib": "*"
+    }
 }
