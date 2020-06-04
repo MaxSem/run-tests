@@ -1,0 +1,52 @@
+#!/bin/env php
+<?php
+
+$content = <<<PHP
+<?php
+/* License header blah. */
+
+
+PHP;
+
+$dir = dirname(__DIR__);
+
+function extractCode(string $filename): string
+{
+    global $dir;
+
+    $code = file_get_contents($filename);
+
+    $filenameShort = str_replace("$dir/", '', $filename);
+    $prefix = "\n/** $filenameShort */";
+
+    if (($index = strpos($code, '%START%')) !== false) {
+        $code = substr($code, $index);
+        $code = preg_replace('/^.*?\r?\n/', '', $code);
+
+        return "$prefix\n$code\n";
+    }
+
+    if (preg_match('/\n.*?(?:class|interface|trait).*$/s', $code, $matches)) {
+        return "$prefix\n{$matches[0]}\n";
+    }
+
+    throw new Exception("$filename: can't find where to start extracting from");
+}
+
+$iterator = new RecursiveDirectoryIterator("$dir/src", FilesystemIterator::CURRENT_AS_PATHNAME);
+
+$files = [];
+foreach ($iterator as $file) {
+    if (is_file($file) && str_ends_with($file, '.php')) {
+        $files[] = $file;
+    }
+}
+sort($files);
+
+foreach ($files as $file) {
+    $content .= extractCode($file);
+}
+
+$content .= extractCode("$dir/run-tests.php");
+
+echo $content;
