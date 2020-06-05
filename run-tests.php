@@ -1819,135 +1819,32 @@ TEST $file
     }
 
     // Load the sections of the test file.
-    $section_text = array('TEST' => '');
+    $testFile = new TestFile($file, (bool)$IN_REDIRECT);
 
-    $fp = fopen($file, "rb") or error("Cannot open test file: $file");
-
-    $bork_info = null;
-
-    if (!feof($fp)) {
-        $line = fgets($fp);
-
-        if ($line === false) {
-            $bork_info = "cannot read test";
-        }
-    } else {
-        $bork_info = "empty test [$file]";
-    }
-    if ($bork_info === null && strncmp('--TEST--', $line, 8)) {
-        $bork_info = "tests must start with --TEST-- [$file]";
-    }
-
-    $section = 'TEST';
-    $secfile = false;
-    $secdone = false;
-
-    while (!feof($fp)) {
-        $line = fgets($fp);
-
-        if ($line === false) {
-            break;
-        }
-
-        // Match the beginning of a section.
-        if (preg_match('/^--([_A-Z]+)--/', $line, $r)) {
-            $section = (string) $r[1];
-
-            if (isset($section_text[$section]) && $section_text[$section]) {
-                $bork_info = "duplicated $section section";
-            }
-
-            // check for unknown sections
-            if (!in_array($section, array(
-                'EXPECT', 'EXPECTF', 'EXPECTREGEX', 'EXPECTREGEX_EXTERNAL', 'EXPECT_EXTERNAL', 'EXPECTF_EXTERNAL', 'EXPECTHEADERS',
-                'POST', 'POST_RAW', 'GZIP_POST', 'DEFLATE_POST', 'PUT', 'GET', 'COOKIE', 'ARGS',
-                'FILE', 'FILEEOF', 'FILE_EXTERNAL', 'REDIRECTTEST',
-                'CAPTURE_STDIO', 'STDIN', 'CGI', 'PHPDBG',
-                'INI', 'ENV', 'EXTENSIONS',
-                'SKIPIF', 'XFAIL', 'XLEAK', 'CLEAN',
-                'CREDITS', 'DESCRIPTION', 'CONFLICTS', 'WHITESPACE_SENSITIVE',
-            ))) {
-                $bork_info = 'Unknown section "' . $section . '"';
-            }
-
-            $section_text[$section] = '';
-            $secfile = $section == 'FILE' || $section == 'FILEEOF' || $section == 'FILE_EXTERNAL';
-            $secdone = false;
-            continue;
-        }
-
-        // Add to the section text.
-        if (!$secdone) {
-            $section_text[$section] .= $line;
-        }
-
-        // End of actual test?
-        if ($secfile && preg_match('/^===DONE===\s*$/', $line)) {
-            $secdone = true;
-        }
-    }
-
-    // the redirect section allows a set of tests to be reused outside of
-    // a given test dir
-    if ($bork_info === null) {
-        if (isset($section_text['REDIRECTTEST'])) {
-            if ($IN_REDIRECT) {
-                $bork_info = "Can't redirect a test from within a redirected test";
-            }
-        } else {
-            if (!isset($section_text['PHPDBG']) && isset($section_text['FILE']) + isset($section_text['FILEEOF']) + isset($section_text['FILE_EXTERNAL']) != 1) {
-                $bork_info = "missing section --FILE--";
-            }
-
-            if (isset($section_text['FILEEOF'])) {
-                $section_text['FILE'] = preg_replace("/[\r\n]+$/", '', $section_text['FILEEOF']);
-                unset($section_text['FILEEOF']);
-            }
-
-            foreach (array('FILE', 'EXPECT', 'EXPECTF', 'EXPECTREGEX') as $prefix) {
-                $key = $prefix . '_EXTERNAL';
-
-                if (isset($section_text[$key])) {
-                    // don't allow tests to retrieve files from anywhere but this subdirectory
-                    $section_text[$key] = dirname($file) . '/' . trim(str_replace('..', '', $section_text[$key]));
-
-                    if (file_exists($section_text[$key])) {
-                        $section_text[$prefix] = file_get_contents($section_text[$key]);
-                        unset($section_text[$key]);
-                    } else {
-                        $bork_info = "could not load --" . $key . "-- " . dirname($file) . '/' . trim($section_text[$key]);
-                    }
-                }
-            }
-
-            if ((isset($section_text['EXPECT']) + isset($section_text['EXPECTF']) + isset($section_text['EXPECTREGEX'])) != 1) {
-                $bork_info = "missing section --EXPECT--, --EXPECTF-- or --EXPECTREGEX--";
-            }
-        }
-    }
-    fclose($fp);
 
     $shortname = str_replace(TEST_PHP_SRCDIR . '/', '', $file);
     $tested_file = $shortname;
 
-    if ($bork_info !== null) {
-        show_result("BORK", $bork_info, $tested_file);
+    $borkage = $testFile->getBorkage();
+    if ($borkage !== null) {
+        show_result("BORK", $borkage, $tested_file);
         $PHP_FAILED_TESTS['BORKED'][] = array(
             'name' => $file,
             'test_name' => '',
             'output' => '',
             'diff' => '',
-            'info' => "$bork_info [$file]",
+            'info' => "$borkage [$file]",
         );
 
-        $junit->markTestAs('BORK', $shortname, $tested_file, 0, $bork_info);
+        $junit->markTestAs('BORK', $shortname, $tested_file, 0, $borkage);
         return 'BORKED';
     }
 
-    if (isset($section_text['CAPTURE_STDIO'])) {
-        $captureStdIn = stripos($section_text['CAPTURE_STDIO'], 'STDIN') !== false;
-        $captureStdOut = stripos($section_text['CAPTURE_STDIO'], 'STDOUT') !== false;
-        $captureStdErr = stripos($section_text['CAPTURE_STDIO'], 'STDERR') !== false;
+    $captureStdio = $testFile->getSection('CAPTURE_STDIO');
+    if ($captureStdio) {
+        $captureStdIn = stripos($captureStdio, 'STDIN') !== false;
+        $captureStdOut = stripos($captureStdio, 'STDOUT') !== false;
+        $captureStdErr = stripos($captureStdio, 'STDERR') !== false;
     } else {
         $captureStdIn = true;
         $captureStdOut = true;
@@ -1959,10 +1856,10 @@ TEST $file
         $cmdRedirect = '';
     }
 
-    $tested = trim($section_text['TEST']);
+    $tested = $testFile->getTestName();
 
     /* For GET/POST/PUT tests, check if cgi sapi is available and if it is, use it. */
-    if (array_key_exists('CGI', $section_text) || !empty($section_text['GET']) || !empty($section_text['POST']) || !empty($section_text['GZIP_POST']) || !empty($section_text['DEFLATE_POST']) || !empty($section_text['POST_RAW']) || !empty($section_text['PUT']) || !empty($section_text['COOKIE']) || !empty($section_text['EXPECTHEADERS'])) {
+    if ($testFile->isCGITest()) {
         if (isset($php_cgi)) {
             $php = $php_cgi . ' -C ';
         } elseif (IS_WINDOWS && file_exists(dirname($php) . "/php-cgi.exe")) {
@@ -1987,11 +1884,7 @@ TEST $file
 
     /* For phpdbg tests, check if phpdbg sapi is available and if it is, use it. */
     $extra_options = '';
-    if (array_key_exists('PHPDBG', $section_text)) {
-        if (!isset($section_text['STDIN'])) {
-            $section_text['STDIN'] = $section_text['PHPDBG'] . "\n";
-        }
-
+    if ($testFile->hasSection('PHPDBG')) {
         if (isset($phpdbg)) {
             $php = $phpdbg . ' -qIb';
 
@@ -2049,8 +1942,8 @@ TEST $file
             mkdir(dirname($copy_file), 0777, true) or error("Cannot create output directory - " . dirname($copy_file));
         }
 
-        if (isset($section_text['FILE'])) {
-            save_text($copy_file, $section_text['FILE']);
+        if ($testFile->hasSection('FILE')) {
+            save_text($copy_file, $testFile->getSection('FILE'));
         }
 
         $temp_filenames = array(
@@ -2068,7 +1961,7 @@ TEST $file
     }
 
     if (is_array($IN_REDIRECT)) {
-        $tested = $IN_REDIRECT['prefix'] . ' ' . trim($section_text['TEST']);
+        $tested = $IN_REDIRECT['prefix'] . ' ' . trim($testFile->getSection('TEST'));
         $tested_file = $tmp_relative_file;
         $shortname = str_replace(TEST_PHP_SRCDIR . '/', '', $tested_file);
     }
@@ -2099,8 +1992,8 @@ TEST $file
     $env['CONTENT_LENGTH'] = '';
     $env['TZ'] = '';
 
-    if (!empty($section_text['ENV'])) {
-        foreach (explode("\n", trim($section_text['ENV'])) as $e) {
+    if (!empty($testFile->getSection('ENV'))) {
+        foreach (explode("\n", trim($testFile->getSection('ENV'))) as $e) {
             $e = explode('=', trim($e), 2);
 
             if (!empty($e[0]) && isset($e[1])) {
@@ -2113,12 +2006,12 @@ TEST $file
     $ini_settings = $workerID ? array('opcache.cache_id' => "worker$workerID") : array();
 
     // Additional required extensions
-    if (array_key_exists('EXTENSIONS', $section_text)) {
+    if ($testFile->hasSection('EXTENSIONS')) {
         $ext_params = array();
         settings2array($ini_overwrites, $ext_params);
         $ext_params = settings2params($ext_params);
         $ext_dir = `$php $pass_options $extra_options $ext_params $no_file_cache -d display_errors=0 -r "echo ini_get('extension_dir');"`;
-        $extensions = preg_split("/[\n\r]+/", trim($section_text['EXTENSIONS']));
+        $extensions = preg_split("/[\n\r]+/", trim($testFile->getSection('EXTENSIONS')));
         $loaded = explode(",", `$php $pass_options $extra_options $ext_params $no_file_cache -d display_errors=0 -r "echo implode(',', get_loaded_extensions());"`);
         $ext_prefix = IS_WINDOWS ? "php_" : "";
         foreach ($extensions as $req_ext) {
@@ -2153,12 +2046,12 @@ TEST $file
 
     // Any special ini settings
     // these may overwrite the test defaults...
-    if (array_key_exists('INI', $section_text)) {
-        $section_text['INI'] = str_replace('{PWD}', dirname($file), $section_text['INI']);
-        $section_text['INI'] = str_replace('{TMP}', sys_get_temp_dir(), $section_text['INI']);
+    if ($testFile->hasSection('INI')) {
+        $testFile->sections['INI'] = str_replace('{PWD}', dirname($file), $testFile->getSection('INI'));
+        $testFile->sections['INI'] = str_replace('{TMP}', sys_get_temp_dir(), $testFile->getSection('INI'));
         $replacement = IS_WINDOWS ? '"' . PHP_BINARY . ' -r \"while ($in = fgets(STDIN)) echo $in;\" > $1"' : 'tee $1 >/dev/null';
-        $section_text['INI'] = preg_replace('/{MAIL:(\S+)}/', $replacement, $section_text['INI']);
-        settings2array(preg_split("/[\n\r]+/", $section_text['INI']), $ini_settings);
+        $testFile->sections['INI'] = preg_replace('/{MAIL:(\S+)}/', $replacement, $testFile->getSection('INI'));
+        settings2array(preg_split("/[\n\r]+/", $testFile->getSection('INI')), $ini_settings);
     }
 
     $ini_settings = settings2params($ini_settings);
@@ -2169,10 +2062,10 @@ TEST $file
     $info = '';
     $warn = false;
 
-    if (array_key_exists('SKIPIF', $section_text)) {
-        if (trim($section_text['SKIPIF'])) {
-            show_file_block('skip', $section_text['SKIPIF']);
-            save_text($test_skipif, $section_text['SKIPIF'], $temp_skipif);
+    if ($testFile->hasSection('SKIPIF')) {
+        if (trim($testFile->getSection('SKIPIF'))) {
+            show_file_block('skip', $testFile->getSection('SKIPIF'));
+            save_text($test_skipif, $testFile->getSection('SKIPIF'), $temp_skipif);
             $extra = !IS_WINDOWS ?
                 "unset REQUEST_METHOD; unset QUERY_STRING; unset PATH_TRANSLATED; unset SCRIPT_FILENAME; unset REQUEST_METHOD;" : "";
 
@@ -2215,7 +2108,7 @@ TEST $file
                 $info = " (warn: $m[1])";
             } elseif (!strncasecmp('xfail', $output, 5)) {
                 // Pretend we have an XFAIL section
-                $section_text['XFAIL'] = ltrim(substr($output, 5));
+                $testFile->sections['XFAIL'] = ltrim(substr($output, 5));
             } elseif ($output !== '') {
                 show_result("BORK", $output, $tested_file, 'reason: invalid output from SKIPIF', $temp_filenames);
                 $PHP_FAILED_TESTS['BORKED'][] = array(
@@ -2233,21 +2126,21 @@ TEST $file
     }
 
     if (!extension_loaded("zlib")
-        && (array_key_exists("GZIP_POST", $section_text)
-        || array_key_exists("DEFLATE_POST", $section_text))) {
+        && ($testFile->hasSection("GZIP_POST")
+        || $testFile->hasSection("DEFLATE_POST"))) {
         $message = "ext/zlib required";
         show_result('SKIP', $tested, $tested_file, "reason: $message", $temp_filenames);
         $junit->markTestAs('SKIP', $shortname, $tested, null, $message);
         return 'SKIPPED';
     }
 
-    if (isset($section_text['REDIRECTTEST'])) {
+    if ($testFile->hasSection('REDIRECTTEST')) {
         $test_files = array();
 
-        $IN_REDIRECT = eval($section_text['REDIRECTTEST']);
+        $IN_REDIRECT = eval($testFile->getSection('REDIRECTTEST'));
         $IN_REDIRECT['via'] = "via [$shortname]\n\t";
         $IN_REDIRECT['dir'] = realpath(dirname($file));
-        $IN_REDIRECT['prefix'] = trim($section_text['TEST']);
+        $IN_REDIRECT['prefix'] = trim($testFile->getSection('TEST'));
 
         if (!empty($IN_REDIRECT['TESTS'])) {
             if (is_array($org_file)) {
@@ -2292,7 +2185,7 @@ TEST $file
         }
     }
 
-    if (is_array($org_file) || isset($section_text['REDIRECTTEST'])) {
+    if (is_array($org_file) || $testFile->hasSection('REDIRECTTEST')) {
         if (is_array($org_file)) {
             $file = $org_file[0];
         }
@@ -2313,15 +2206,15 @@ TEST $file
     }
 
     // We've satisfied the preconditions - run the test!
-    if (isset($section_text['FILE'])) {
-        show_file_block('php', $section_text['FILE'], 'TEST');
-        save_text($test_file, $section_text['FILE'], $temp_file);
+    if ($testFile->hasSection('FILE')) {
+        show_file_block('php', $testFile->getSection('FILE'), 'TEST');
+        save_text($test_file, $testFile->getSection('FILE'), $temp_file);
     } else {
         $test_file = $temp_file = "";
     }
 
-    if (array_key_exists('GET', $section_text)) {
-        $query_string = trim($section_text['GET']);
+    if ($testFile->hasSection('GET')) {
+        $query_string = trim($testFile->getSection('GET'));
     } else {
         $query_string = '';
     }
@@ -2337,13 +2230,13 @@ TEST $file
         $env['SCRIPT_FILENAME'] = $test_file;
     }
 
-    if (array_key_exists('COOKIE', $section_text)) {
-        $env['HTTP_COOKIE'] = trim($section_text['COOKIE']);
+    if ($testFile->hasSection('COOKIE')) {
+        $env['HTTP_COOKIE'] = trim($testFile->getSection('COOKIE'));
     } else {
         $env['HTTP_COOKIE'] = '';
     }
 
-    $args = isset($section_text['ARGS']) ? ' -- ' . $section_text['ARGS'] : '';
+    $args = $testFile->hasSection('ARGS') ? ' -- ' . $testFile->getSection('ARGS') : '';
 
     if ($preload && !empty($test_file)) {
         save_text($preload_filename, "<?php opcache_compile_file('$test_file');");
@@ -2353,8 +2246,8 @@ TEST $file
         $pass_options .= " -d opcache.preload=" . $preload_filename;
     }
 
-    if (array_key_exists('POST_RAW', $section_text) && !empty($section_text['POST_RAW'])) {
-        $post = trim($section_text['POST_RAW']);
+    if (!empty($testFile->getSection('POST_RAW'))) {
+        $post = trim($testFile->getSection('POST_RAW'));
         $raw_lines = explode("\n", $post);
 
         $request = '';
@@ -2384,8 +2277,8 @@ TEST $file
 
         save_text($tmp_post, $request);
         $cmd = "$php $pass_options $ini_settings -f \"$test_file\"$cmdRedirect < \"$tmp_post\"";
-    } elseif (array_key_exists('PUT', $section_text) && !empty($section_text['PUT'])) {
-        $post = trim($section_text['PUT']);
+    } elseif (!empty($testFile->getSection('PUT'))) {
+        $post = trim($testFile->getSection('PUT'));
         $raw_lines = explode("\n", $post);
 
         $request = '';
@@ -2415,8 +2308,8 @@ TEST $file
 
         save_text($tmp_post, $request);
         $cmd = "$php $pass_options $ini_settings -f \"$test_file\"$cmdRedirect < \"$tmp_post\"";
-    } elseif (array_key_exists('POST', $section_text) && !empty($section_text['POST'])) {
-        $post = trim($section_text['POST']);
+    } elseif (!empty($testFile->getSection('POST', ''))) {
+        $post = trim($testFile->getSection('POST'));
         $content_length = strlen($post);
         save_text($tmp_post, $post);
 
@@ -2430,8 +2323,8 @@ TEST $file
         }
 
         $cmd = "$php $pass_options $ini_settings -f \"$test_file\"$cmdRedirect < \"$tmp_post\"";
-    } elseif (array_key_exists('GZIP_POST', $section_text) && !empty($section_text['GZIP_POST'])) {
-        $post = trim($section_text['GZIP_POST']);
+    } elseif (!empty($testFile->getSection('GZIP_POST'))) {
+        $post = trim($testFile->getSection('GZIP_POST'));
         $post = gzencode($post, 9, FORCE_GZIP);
         $env['HTTP_CONTENT_ENCODING'] = 'gzip';
 
@@ -2443,8 +2336,8 @@ TEST $file
         $env['CONTENT_LENGTH'] = $content_length;
 
         $cmd = "$php $pass_options $ini_settings -f \"$test_file\"$cmdRedirect < \"$tmp_post\"";
-    } elseif (array_key_exists('DEFLATE_POST', $section_text) && !empty($section_text['DEFLATE_POST'])) {
-        $post = trim($section_text['DEFLATE_POST']);
+    } elseif (!empty($testFile->getSection('DEFLATE_POST'))) {
+        $post = trim($testFile->getSection('DEFLATE_POST'));
         $post = gzcompress($post, 9);
         $env['HTTP_CONTENT_ENCODING'] = 'deflate';
         save_text($tmp_post, $post);
@@ -2488,7 +2381,7 @@ COMMAND $cmd
     $hrtime = hrtime();
     $startTime = $hrtime[0] * 1000000000 + $hrtime[1];
 
-    $out = system_with_timeout($cmd, $env, $section_text['STDIN'] ?? null, $captureStdIn, $captureStdOut, $captureStdErr);
+    $out = system_with_timeout($cmd, $env, $testFile->getSection('STDIN') ?? null, $captureStdIn, $captureStdOut, $captureStdErr);
 
     $junit->stopTimer($shortname);
     $hrtime = hrtime();
@@ -2503,20 +2396,18 @@ COMMAND $cmd
         );
     }
 
-    if (array_key_exists('CLEAN', $section_text) && (!$no_clean || $cfg['keep']['clean'])) {
-        if (trim($section_text['CLEAN'])) {
-            show_file_block('clean', $section_text['CLEAN']);
-            save_text($test_clean, trim($section_text['CLEAN']), $temp_clean);
+    if (trim($testFile->getSection('CLEAN', '')) && (!$no_clean || $cfg['keep']['clean'])) {
+        show_file_block('clean', $testFile->getSection('CLEAN'));
+        save_text($test_clean, trim($testFile->getSection('CLEAN')), $temp_clean);
 
-            if (!$no_clean) {
-                $extra = !IS_WINDOWS ?
-                    "unset REQUEST_METHOD; unset QUERY_STRING; unset PATH_TRANSLATED; unset SCRIPT_FILENAME; unset REQUEST_METHOD;" : "";
-                system_with_timeout("$extra $php $pass_options $extra_options -q $orig_ini_settings $no_file_cache \"$test_clean\"", $env);
-            }
+        if (!$no_clean) {
+            $extra = !IS_WINDOWS ?
+                "unset REQUEST_METHOD; unset QUERY_STRING; unset PATH_TRANSLATED; unset SCRIPT_FILENAME; unset REQUEST_METHOD;" : "";
+            system_with_timeout("$extra $php $pass_options $extra_options -q $orig_ini_settings $no_file_cache \"$test_clean\"", $env);
+        }
 
-            if (!$cfg['keep']['clean']) {
-                @unlink($test_clean);
-            }
+        if (!$cfg['keep']['clean']) {
+            @unlink($test_clean);
         }
     }
 
@@ -2553,10 +2444,10 @@ COMMAND $cmd
 
     $failed_headers = false;
 
-    if (isset($section_text['EXPECTHEADERS'])) {
+    if ($testFile->hasSection('EXPECTHEADERS')) {
         $want = array();
         $wanted_headers = array();
-        $lines = preg_split("/[\n\r]+/", $section_text['EXPECTHEADERS']);
+        $lines = preg_split("/[\n\r]+/", $testFile->getSection('EXPECTHEADERS'));
 
         foreach ($lines as $line) {
             if (strpos($line, ':') !== false) {
@@ -2590,17 +2481,17 @@ COMMAND $cmd
         $output = trim(preg_replace("/\n?Warning: Can't preload [^\n]*\n?/", "", $output));
     }
 
-    if (isset($section_text['EXPECTF']) || isset($section_text['EXPECTREGEX'])) {
-        if (isset($section_text['EXPECTF'])) {
-            $wanted = trim($section_text['EXPECTF']);
+    if ($testFile->hasSection('EXPECTF') || $testFile->hasSection('EXPECTREGEX')) {
+        if ($testFile->hasSection('EXPECTF')) {
+            $wanted = trim($testFile->getSection('EXPECTF'));
         } else {
-            $wanted = trim($section_text['EXPECTREGEX']);
+            $wanted = trim($testFile->getSection('EXPECTREGEX'));
         }
 
         show_file_block('exp', $wanted);
         $wanted_re = preg_replace('/\r\n/', "\n", $wanted);
 
-        if (isset($section_text['EXPECTF'])) {
+        if ($testFile->hasSection('EXPECTF')) {
             // do preg_quote, but miss out any %r delimited sections
             $temp = "";
             $r = "%r";
@@ -2652,10 +2543,10 @@ COMMAND $cmd
             @unlink($tmp_post);
 
             if (!$leaked && !$failed_headers) {
-                if (isset($section_text['XFAIL'])) {
+                if ($testFile->hasSection('XFAIL')) {
                     $warn = true;
                     $info = " (warn: XFAIL section but test passes)";
-                } elseif (isset($section_text['XLEAK'])) {
+                } elseif ($testFile->hasSection('XLEAK')) {
                     $warn = true;
                     $info = " (warn: XLEAK section but test passes)";
                 } else {
@@ -2666,7 +2557,7 @@ COMMAND $cmd
             }
         }
     } else {
-        $wanted = trim($section_text['EXPECT']);
+        $wanted = trim($testFile->getSection('EXPECT'));
         $wanted = preg_replace('/\r\n/', "\n", $wanted);
         show_file_block('exp', $wanted);
 
@@ -2680,10 +2571,10 @@ COMMAND $cmd
             @unlink($tmp_post);
 
             if (!$leaked && !$failed_headers) {
-                if (isset($section_text['XFAIL'])) {
+                if ($testFile->hasSection('XFAIL')) {
                     $warn = true;
                     $info = " (warn: XFAIL section but test passes)";
-                } elseif (isset($section_text['XLEAK'])) {
+                } elseif ($testFile->hasSection('XLEAK')) {
                     $warn = true;
                     $info = " (warn: XLEAK section but test passes)";
                 } else {
@@ -2709,7 +2600,7 @@ COMMAND $cmd
     }
 
     if ($leaked) {
-        $restype[] = isset($section_text['XLEAK']) ?
+        $restype[] = $testFile->hasSection('XLEAK') ?
                         'XLEAK' : 'LEAK';
     }
 
@@ -2718,12 +2609,12 @@ COMMAND $cmd
     }
 
     if (!$passed) {
-        if (isset($section_text['XFAIL'])) {
+        if ($testFile->hasSection('XFAIL')) {
             $restype[] = 'XFAIL';
-            $info = '  XFAIL REASON: ' . rtrim($section_text['XFAIL']);
-        } elseif (isset($section_text['XLEAK'])) {
+            $info = '  XFAIL REASON: ' . rtrim($testFile->getSection('XFAIL'));
+        } elseif ($testFile->hasSection('XLEAK')) {
             $restype[] = 'XLEAK';
-            $info = '  XLEAK REASON: ' . rtrim($section_text['XLEAK']);
+            $info = '  XLEAK REASON: ' . rtrim($testFile->getSection('XLEAK'));
         } else {
             $restype[] = 'FAIL';
         }
