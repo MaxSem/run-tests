@@ -18,6 +18,7 @@
    |          Derick Rethans <derick@php.net>                             |
    |          Sander Roobol <sander@php.net>                              |
    |          Andrea Faulds <ajf@ajf.me>                                  |
+   |          Max Semenik <maxsem.wiki@gmail.com>                         |
    | (based on version by: Stig Bakken <ssb@php.net>)                     |
    | (based on the PHP 3 test framework by Rasmus Lerdorf)                |
    +----------------------------------------------------------------------+
