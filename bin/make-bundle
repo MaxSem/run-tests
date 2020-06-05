@@ -1,10 +1,13 @@
 #!/bin/env php
 <?php
 
+$gitRevision = trim(`git rev-parse HEAD`);
+
 $content = <<<PHP
 <?php
 /* License header blah. */
 
+const GIT_REVISION = '$gitRevision';
 
 PHP;
 

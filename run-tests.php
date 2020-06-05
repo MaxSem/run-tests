@@ -27,7 +27,7 @@
 
 require __DIR__ . '/vendor/autoload.php';
 
-// %START% Everything after this line will be included into a bundle
+// %START% Everything after this line will be included into the bundle
 
 // Temorary vars during refactoring
 
@@ -617,7 +617,10 @@ function main()
                     $html_output = is_resource($html_file);
                     break;
                 case '--version':
-                    echo '$Id: 0a2f592c8ca85b37975b73e5372d1fa84890a50f $' . "\n";
+                    if (!defined('GIT_REVISION')) {
+                        define('GIT_REVISION', trim(`git rev-parse HEAD`));
+                    }
+                    echo GIT_REVISION . "\n";
                     exit(1);
 
                 default:
