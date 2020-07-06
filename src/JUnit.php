@@ -252,7 +252,7 @@ class JUnit
         unset($this->rootSuite['files'][$file_name]['start']);
     }
 
-    public function mergeResults(JUnit $other): void
+    public function mergeResults(?JUnit $other): void
     {
         if (!$this->enabled) {
             return;

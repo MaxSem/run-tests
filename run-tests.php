@@ -1702,6 +1702,7 @@ function run_worker()
 {
     global $workerID, $workerSock;
 
+    /** @var JUnit $junit */
     global $junit;
 
     $sockUri = getenv("TEST_PHP_URI");
