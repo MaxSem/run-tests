@@ -10,6 +10,7 @@
         "classmap": ["src/"]
     },
     "require": {
-        "ext-zlib": "*"
+        "ext-zlib": "*",
+        "ext-zend-opcache": "*"
     }
 }
